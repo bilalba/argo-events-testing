@@ -135,7 +135,7 @@ var testCmd = &cobra.Command{
 		}
 
 		// finished producing messages
-		fmt.Printf("Finished producing, waiting %ds for remaining invocations\n", w)
+		fmt.Printf("Consuming from topic '%s' for %ds\n", outputTopic, w)
 		time.Sleep(time.Duration(w) * time.Second)
 
 		return results.Finalize()

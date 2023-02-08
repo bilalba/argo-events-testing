@@ -13,11 +13,8 @@ import (
 
 type Results struct {
 	// lookup
-	Triggers       map[string]*TriggerWithExpr
-	TriggersForDep map[string][]string
-
-	// state
-	Produced map[string][]*producer.ProducerMsg
+	Triggers       map[string]*Trigger
+	TriggersForDep map[string][]*Trigger
 
 	// result
 	failures int
@@ -25,15 +22,9 @@ type Results struct {
 	// atLeastOnce int
 }
 
-type TriggerWithExpr struct {
-	*v1alpha1.Trigger
-	Expr  *govaluate.EvaluableExpression
-	Terms int
-}
-
 func NewResults(sensor *v1alpha1.Sensor) (*Results, error) {
-	triggers := map[string]*TriggerWithExpr{}
-	triggersForDep := map[string][]string{}
+	triggers := map[string]*Trigger{}
+	triggersForDep := map[string][]*Trigger{}
 
 	for _, trigger := range sensor.Spec.Triggers {
 		expr, err := govaluate.NewEvaluableExpression(trigger.Template.Conditions)
@@ -48,21 +39,20 @@ func NewResults(sensor *v1alpha1.Sensor) (*Results, error) {
 			}
 		}
 
-		for _, dep := range expr.Vars() {
-			triggersForDep[dep] = append(triggersForDep[dep], trigger.Template.Name)
+		triggers[trigger.Template.Name] = &Trigger{
+			Trigger: trigger,
+			Expr:    expr,
+			Terms:   andOps + 1,
 		}
 
-		triggers[trigger.Template.Name] = &TriggerWithExpr{
-			trigger,
-			expr,
-			andOps + 1,
+		for _, dep := range expr.Vars() {
+			triggersForDep[dep] = append(triggersForDep[dep], triggers[trigger.Template.Name])
 		}
 	}
 
 	return &Results{
 		Triggers:       triggers,
 		TriggersForDep: triggersForDep,
-		Produced:       map[string][]*producer.ProducerMsg{},
 	}, nil
 }
 
@@ -72,8 +62,9 @@ func (r *Results) Collect(ctx context.Context, produced <-chan *producer.Produce
 		case <-ctx.Done():
 			return
 		case msg := <-produced:
+			// add event to applicable triggers
 			for _, trigger := range r.TriggersForDep[msg.Dependency.Name] {
-				r.Produced[trigger] = append(r.Produced[trigger], msg)
+				trigger.remaining = append(trigger.remaining, msg)
 			}
 		case msg := <-consumed:
 			r.analyze(msg)
@@ -84,26 +75,8 @@ func (r *Results) Collect(ctx context.Context, produced <-chan *producer.Produce
 func (r *Results) Finalize() error {
 	// check there are no remaining expected invocations
 	for name, trigger := range r.Triggers {
-		msgs := r.Produced[name]
-
-		if len(msgs) < trigger.Terms {
-			continue
-		}
-
-		// loop thru every possible permutation of messages and check
-		// if resulting invocation satisfies the trigger
-		for _, combination := range combin.Combinations(len(msgs), trigger.Terms) {
-			params := Parameters{}
-			for _, i := range combination {
-				params[msgs[i].Dependency.Name] = msgs[i].Value
-			}
-
-			// check expression
-			satisfied, _ := trigger.Expr.Eval(params)
-			if satisfied == true {
-				r.failure(fmt.Sprintf("trigger '%s' not invoked when condition was satisfied (condition='%s' dependencies='%v')", name, trigger.Expr.String(), params))
-				break
-			}
+		if params, ok := trigger.Satisfied(); ok {
+			r.failure(fmt.Sprintf("trigger '%s' not invoked when condition was satisfied (condition='%s' dependencies='%v')", name, trigger.Expr.String(), params))
 		}
 	}
 
@@ -120,7 +93,7 @@ func (r *Results) analyze(msg *consumer.ConsumerMsg) {
 
 	// construct params
 	for dep, val := range msg.Value {
-		if ok := r.contains(msg.Trigger, dep, val); ok {
+		if ok := trigger.containsAndShuffle(dep, val); ok {
 			params[dep] = val
 		} else {
 			r.failure(fmt.Sprintf("trigger '%s' invoked with incorrect dependency value (condition='%s' dependency='%s' value='%s')", msg.Trigger, trigger.Expr.String(), dep, val))
@@ -144,25 +117,6 @@ func (r *Results) analyze(msg *consumer.ConsumerMsg) {
 	}
 }
 
-func (r *Results) contains(trigger string, dep string, val string) bool {
-	var found bool
-	var index int
-	for i, msg := range r.Produced[trigger] {
-		if msg.Dependency.Name == dep && msg.Value == val {
-			found = true
-			index = i
-		}
-	}
-
-	// remove from list as a message can only be used by each trigger
-	// once
-	if found {
-		r.Produced[trigger] = append(r.Produced[trigger][:index], r.Produced[trigger][index+1:]...)
-	}
-
-	return found
-}
-
 func (r *Results) success(message string) {
 	fmt.Printf("✅ %s\n", message)
 }
@@ -170,6 +124,72 @@ func (r *Results) success(message string) {
 func (r *Results) failure(message string) {
 	r.failures++
 	fmt.Printf("❌ %s\n", message)
+}
+
+type Trigger struct {
+	*v1alpha1.Trigger
+
+	// metadata
+	Expr  *govaluate.EvaluableExpression
+	Terms int
+
+	// state
+	// seen      []string
+	extra     []*producer.ProducerMsg
+	remaining []*producer.ProducerMsg
+}
+
+func (t *Trigger) Satisfied() (Parameters, bool) {
+	if len(t.remaining) < t.Terms {
+		return nil, false
+	}
+
+	for _, combination := range combin.Combinations(len(t.remaining), t.Terms) {
+		params := Parameters{}
+		for _, i := range combination {
+			params[t.remaining[i].Dependency.Name] = t.remaining[i].Value
+		}
+
+		// check expression
+		satisfied, _ := t.Expr.Eval(params)
+		if satisfied == true {
+			return params, true
+		}
+	}
+
+	return nil, false
+}
+
+func (t *Trigger) containsAndShuffle(dep string, val string) bool {
+	for i, msg := range t.remaining {
+		if msg.Dependency.Name == dep && msg.Value == val {
+			t.remaining = t.shuffle(i, dep)
+			return true
+		}
+	}
+
+	for i, msg := range t.extra {
+		if msg.Dependency.Name == dep && msg.Value == val {
+			t.extra = append(t.extra[:i], t.extra[i+1:]...)
+			return true
+		}
+	}
+
+	return false
+}
+
+func (t *Trigger) shuffle(index int, dep string) []*producer.ProducerMsg {
+	updated := []*producer.ProducerMsg{}
+
+	for i := 0; i < index; i++ {
+		if t.remaining[i].Dependency.Name == dep {
+			t.extra = append(t.extra, t.remaining[i])
+		} else {
+			updated = append(updated, t.remaining[i])
+		}
+	}
+
+	return append(updated, t.remaining[index+1:]...)
 }
 
 type Parameters map[string]string
