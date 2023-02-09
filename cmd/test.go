@@ -35,8 +35,9 @@ var (
 	namespace string
 	local     bool
 
-	n int
-	w int
+	n       int
+	w       int
+	timeout int
 )
 
 var testCmd = &cobra.Command{
@@ -135,8 +136,21 @@ var testCmd = &cobra.Command{
 		}
 
 		// finished producing messages
-		fmt.Printf("Consuming from topic '%s' for %ds\n", outputTopic, w)
-		time.Sleep(time.Duration(w) * time.Second)
+		ticker := time.NewTicker(1 * time.Minute)
+		elapsed := 0
+		for {
+			<-ticker.C
+			elapsed++
+
+			// check if done
+			if elapsed >= timeout || results.Done() {
+				ticker.Stop()
+				break
+			}
+		}
+
+		fmt.Printf("Waiting %ds for any late events\n", w)
+		time.Sleep(time.Duration(w) * time.Minute)
 
 		return results.Finalize()
 	},
@@ -157,5 +171,6 @@ func init() {
 
 	// testing
 	testCmd.Flags().IntVarP(&n, "events", "n", 1, "number of events to produce")
-	testCmd.Flags().IntVarP(&w, "wait", "w", 10, "number of seconds to wait once all messages have been produced")
+	testCmd.Flags().IntVarP(&w, "wait", "w", 1, "number of minutes to wait once all messages have been produced")
+	testCmd.Flags().IntVarP(&timeout, "timeout", "", 60, "maximum number of minutes to run tests")
 }

@@ -72,6 +72,16 @@ func (r *Results) Collect(ctx context.Context, produced <-chan *producer.Produce
 	}
 }
 
+func (r *Results) Done() bool {
+	for _, trigger := range r.Triggers {
+		if _, ok := trigger.Satisfied(); ok {
+			return false
+		}
+	}
+
+	return true
+}
+
 func (r *Results) Finalize() error {
 	// check there are no remaining expected invocations
 	for name, trigger := range r.Triggers {

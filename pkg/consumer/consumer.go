@@ -28,6 +28,7 @@ func (c *Consumer) Consume(ctx context.Context, config *sarama.Config) error {
 		return err
 	}
 
+	fmt.Printf("Consuming from topic '%s'\n", c.Topic)
 	c.ready = make(chan interface{})
 
 	go func() {
