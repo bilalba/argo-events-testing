@@ -130,6 +130,9 @@ var testCmd = &cobra.Command{
 			return err
 		}
 
+		// start the clock
+		t := time.Now()
+
 		// start producer
 		if err := producer.Produce(kafkaConfig, n, sensor.Spec.Dependencies); err != nil {
 			return err
@@ -149,7 +152,10 @@ var testCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("Waiting %dm for any late events\n", w)
+		// stop the clock
+		fmt.Printf("🕓 %s\n", time.Since(t))
+
+		fmt.Printf("Waiting %dm for any late events...\n", w)
 		time.Sleep(time.Duration(w) * time.Minute)
 
 		return results.Finalize()

@@ -17,7 +17,8 @@ type Results struct {
 	TriggersForDep map[string][]*Trigger
 
 	// result
-	failures int
+	failures  int
+	successes int
 	// atMostOnce  int
 	// atLeastOnce int
 }
@@ -90,7 +91,12 @@ func (r *Results) Finalize() error {
 		}
 	}
 
+	if r.successes > 0 {
+		fmt.Printf("✅ %d triggers invoked successfully\n", r.successes)
+	}
+
 	if r.failures > 0 {
+		fmt.Printf("❌ %d triggers not invoked successfully\n", r.successes)
 		return fmt.Errorf("%d failures", r.failures)
 	}
 
@@ -128,6 +134,7 @@ func (r *Results) analyze(msg *consumer.ConsumerMsg) {
 }
 
 func (r *Results) success(message string) {
+	r.successes++
 	fmt.Printf("✅ %s\n", message)
 }
 
