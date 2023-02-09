@@ -149,7 +149,7 @@ var testCmd = &cobra.Command{
 			}
 		}
 
-		fmt.Printf("Waiting %ds for any late events\n", w)
+		fmt.Printf("Waiting %dm for any late events\n", w)
 		time.Sleep(time.Duration(w) * time.Minute)
 
 		return results.Finalize()

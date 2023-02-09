@@ -23,7 +23,7 @@ type ConsumerMsg struct {
 }
 
 func (c *Consumer) Consume(ctx context.Context, config *sarama.Config) error {
-	consumer, err := sarama.NewConsumerGroup(c.Brokers, uuid.New().String(), config)
+	consumer, err := sarama.NewConsumerGroup(c.Brokers, fmt.Sprintf("test-%s", uuid.New().String()), config)
 	if err != nil {
 		return err
 	}
