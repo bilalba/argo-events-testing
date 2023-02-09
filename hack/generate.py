@@ -44,10 +44,8 @@ def generate_eventsource(n, brokers, topic):
                 f'e{i}': {
                     'url': ','.join(brokers),
                     'topic': topic,
+                    'partition': '0',
                     'tls': {},
-                    'consumerGroup': {
-                        'groupName': 'argo-events-testing'
-                    },
                     'filter': {
                         'expression': f'key=="e{i}"'
                     }
