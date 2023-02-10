@@ -3,6 +3,8 @@ package results
 import (
 	"context"
 	"fmt"
+	"reflect"
+	"time"
 
 	"github.com/Knetic/govaluate"
 	"github.com/bilalba/argo-events-testing/pkg/consumer"
@@ -15,12 +17,13 @@ type Results struct {
 	// lookup
 	Triggers       map[string]*Trigger
 	TriggersForDep map[string][]*Trigger
+	Last           time.Time
 
 	// result
-	failures  int
-	successes int
-	// atMostOnce  int
-	// atLeastOnce int
+	failures    int
+	successes   int
+	atMostOnce  int
+	atLeastOnce int
 }
 
 func NewResults(sensor *v1alpha1.Sensor) (*Results, error) {
@@ -68,6 +71,7 @@ func (r *Results) Collect(ctx context.Context, produced <-chan *producer.Produce
 				trigger.remaining = append(trigger.remaining, msg)
 			}
 		case msg := <-consumed:
+			r.Last = time.Now()
 			r.analyze(msg)
 		}
 	}
@@ -87,16 +91,26 @@ func (r *Results) Finalize() error {
 	// check there are no remaining expected invocations
 	for name, trigger := range r.Triggers {
 		if params, ok := trigger.Satisfied(); ok {
-			r.failure(fmt.Sprintf("trigger '%s' not invoked when condition was satisfied (condition='%s' dependencies='%v')", name, trigger.Expr.String(), params))
+			if !trigger.AtLeastOnce {
+				r.atMostOnce++
+				r.info(fmt.Sprintf("trigger '%s' not invoked when condition was satisfied (condition='%s' dependencies='%v', semantics='at-most-once')", name, trigger.Expr.String(), params))
+			} else {
+				r.failure(fmt.Sprintf("trigger '%s' not invoked when condition was satisfied (condition='%s' dependencies='%v', semantics='at-least-once')", name, trigger.Expr.String(), params))
+			}
 		}
 	}
 
 	if r.successes > 0 {
-		fmt.Printf("✅ %d triggers invoked successfully\n", r.successes)
+		fmt.Printf("✅ %d successful trigger invocations\n", r.successes)
 	}
-
+	if r.atMostOnce > 0 {
+		fmt.Printf("⚠️  %d missing trigger invocations with semantics specificed as 'at-most-once'\n", r.atMostOnce)
+	}
+	if r.atLeastOnce > 0 {
+		fmt.Printf("⚠️  %d duplicate trigger invocations with semantics specificed as 'at-least-once'\n", r.atLeastOnce)
+	}
 	if r.failures > 0 {
-		fmt.Printf("❌ %d triggers not invoked successfully\n", r.successes)
+		fmt.Printf("❌ %d failures\n", r.failures)
 		return fmt.Errorf("%d failures", r.failures)
 	}
 
@@ -106,6 +120,20 @@ func (r *Results) Finalize() error {
 func (r *Results) analyze(msg *consumer.ConsumerMsg) {
 	params := Parameters{}
 	trigger := r.Triggers[msg.Trigger]
+
+	for _, seen := range trigger.seen {
+		// duplicate invocation
+		if reflect.DeepEqual(seen, msg.Value) {
+			if trigger.AtLeastOnce {
+				r.atLeastOnce++
+				r.info(fmt.Sprintf("trigger '%s' invoked twice (semantics specified as 'at least once')", msg.Trigger))
+			} else {
+				r.failure(fmt.Sprintf("trigger '%s' invoked twice (semantics specified as 'at most once')", msg.Trigger))
+			}
+			return
+		}
+	}
+	trigger.seen = append(trigger.seen, msg.Value)
 
 	// construct params
 	for dep, val := range msg.Value {
@@ -143,6 +171,10 @@ func (r *Results) failure(message string) {
 	fmt.Printf("❌ %s\n", message)
 }
 
+func (r *Results) info(message string) {
+	fmt.Printf("⚠️  %s\n", message)
+}
+
 type Trigger struct {
 	*v1alpha1.Trigger
 
@@ -151,7 +183,7 @@ type Trigger struct {
 	Terms int
 
 	// state
-	// seen      []string
+	seen      []map[string]string
 	extra     []*producer.ProducerMsg
 	remaining []*producer.ProducerMsg
 }

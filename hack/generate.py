@@ -54,7 +54,7 @@ def generate_eventsource(n, brokers, topic):
         }
     }
 
-def generate_sensor(n, brokers, topic, replicas, operator, atLeastOnce):
+def generate_sensor(n, brokers, topic, replicas, operator, at_least_once):
     combos = []
     for c in range(1, n+1):
         combos += itertools.combinations(range(n), c)
@@ -71,6 +71,11 @@ def generate_sensor(n, brokers, topic, replicas, operator, atLeastOnce):
         'spec': {
             'replicas': replicas,
             'template': {
+                'metadata': {
+                    'labels': {
+                        'chaos': 'true'
+                    }
+                },
                 'container': {
                     'imagePullPolicy': 'Always'
                 }
@@ -81,7 +86,7 @@ def generate_sensor(n, brokers, topic, replicas, operator, atLeastOnce):
                 'eventName': f'e{i}',
             } for i in range(n)],
             'triggers': [{
-                'atLeastOnce': atLeastOnce,
+                'atLeastOnce': at_least_once,
                 'template': {
                     'name': f't{i}',
                     'conditions': operator.join(map(lambda i: f'd{i}', c)),

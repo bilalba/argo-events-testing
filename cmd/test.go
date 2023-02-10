@@ -35,9 +35,10 @@ var (
 	namespace string
 	local     bool
 
-	n       int
-	w       int
-	timeout int
+	n          int
+	w          int
+	timeout    int
+	msgTimeout int
 )
 
 var testCmd = &cobra.Command{
@@ -130,30 +131,36 @@ var testCmd = &cobra.Command{
 			return err
 		}
 
-		// start the clock
-		t := time.Now()
-
 		// start producer
 		if err := producer.Produce(kafkaConfig, n, sensor.Spec.Dependencies); err != nil {
 			return err
 		}
 
-		// finished producing messages
-		ticker := time.NewTicker(1 * time.Minute)
-		elapsed := 0
-		for {
-			<-ticker.C
-			elapsed++
+		// start the clock
+		t0 := time.Now()
+		ticker := time.NewTicker(15 * time.Second)
 
-			// check if done
-			if elapsed >= timeout || results.Done() {
-				ticker.Stop()
-				break
+		func() {
+			for {
+				defer ticker.Stop()
+
+				tn := <-ticker.C
+				if tn.Sub(t0).Minutes() > float64(timeout) {
+					fmt.Printf("Timing out after %dm\n", timeout)
+					return
+				}
+				if tn.Sub(results.Last).Minutes() > float64(msgTimeout) {
+					fmt.Printf("Last message recieved %dm ago, timing out\n", msgTimeout)
+					return
+				}
+				if results.Done() {
+					return
+				}
 			}
-		}
+		}()
 
 		// stop the clock
-		fmt.Printf("🕓 %s\n", time.Since(t))
+		fmt.Printf("🕓 %s\n", time.Since(t0))
 
 		fmt.Printf("Waiting %dm for any late events...\n", w)
 		time.Sleep(time.Duration(w) * time.Minute)
@@ -179,4 +186,5 @@ func init() {
 	testCmd.Flags().IntVarP(&n, "events", "n", 1, "number of events to produce")
 	testCmd.Flags().IntVarP(&w, "wait", "w", 1, "number of minutes to wait once all messages have been produced")
 	testCmd.Flags().IntVarP(&timeout, "timeout", "", 60, "maximum number of minutes to run tests")
+	testCmd.Flags().IntVarP(&msgTimeout, "msg-timeout", "", 3, "number of minutes since the last recieved message to wait before timing out")
 }
