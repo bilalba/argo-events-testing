@@ -61,6 +61,9 @@ func NewResults(sensor *v1alpha1.Sensor) (*Results, error) {
 }
 
 func (r *Results) Collect(ctx context.Context, produced <-chan *producer.ProducerMsg, consumed <-chan *consumer.ConsumerMsg) {
+	// instantiate
+	r.Last = time.Now()
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -140,7 +143,7 @@ func (r *Results) analyze(msg *consumer.ConsumerMsg) {
 		if ok := trigger.containsAndShuffle(dep, val); ok {
 			params[dep] = val
 		} else {
-			r.failure(fmt.Sprintf("trigger '%s' invoked with incorrect dependency value (condition='%s' dependency='%s' value='%s')", msg.Trigger, trigger.Expr.String(), dep, val))
+			r.failure(fmt.Sprintf("trigger '%s' invoked with incorrect dependency value (condition='%s' dependencies='%v')", msg.Trigger, trigger.Expr.String(), msg.Value))
 			return
 		}
 	}

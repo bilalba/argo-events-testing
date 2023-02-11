@@ -16,9 +16,11 @@ import (
 	"k8s.io/client-go/util/homedir"
 
 	"github.com/Shopify/sarama"
+	"github.com/bilalba/argo-events-testing/pkg/chaos"
 	"github.com/bilalba/argo-events-testing/pkg/consumer"
 	"github.com/bilalba/argo-events-testing/pkg/producer"
 	"github.com/bilalba/argo-events-testing/pkg/results"
+	"github.com/bilalba/argo-events-testing/pkg/scram"
 	"github.com/bilalba/argo-events-testing/pkg/sensor/v1alpha1"
 	"github.com/spf13/cobra"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -29,6 +31,7 @@ var (
 	inputTopic  string
 	outputTopic string
 	tls         bool
+	sasl        bool
 	verbose     bool
 
 	name      string
@@ -36,9 +39,10 @@ var (
 	local     bool
 
 	n          int
-	w          int
-	timeout    int
-	msgTimeout int
+	w          time.Duration
+	chaosFreq  time.Duration
+	timeout    time.Duration
+	msgTimeout time.Duration
 )
 
 var testCmd = &cobra.Command{
@@ -98,6 +102,15 @@ var testCmd = &cobra.Command{
 		if tls {
 			kafkaConfig.Net.TLS.Enable = true
 		}
+		if sasl {
+			kafkaConfig.Net.SASL.Enable = true
+			kafkaConfig.Net.SASL.Mechanism = "SCRAM-SHA-512"
+			kafkaConfig.Net.SASL.User = os.Getenv("SASL_USERNAME")
+			kafkaConfig.Net.SASL.Password = os.Getenv("SASL_PASSWORD")
+			kafkaConfig.Net.SASL.SCRAMClientGeneratorFunc = func() sarama.SCRAMClient {
+				return &scram.XDGSCRAMClient{HashGeneratorFcn: scram.SHA512}
+			}
+		}
 		if verbose {
 			sarama.Logger = log.New(os.Stderr, "", log.LstdFlags)
 		}
@@ -109,7 +122,7 @@ var testCmd = &cobra.Command{
 		}
 
 		produced := make(chan *producer.ProducerMsg)
-		consumed := make(chan *consumer.ConsumerMsg, n)
+		consumed := make(chan *consumer.ConsumerMsg)
 
 		consumer := &consumer.Consumer{
 			Brokers: brokers,
@@ -136,6 +149,18 @@ var testCmd = &cobra.Command{
 			return err
 		}
 
+		// start chaos
+		cctx, cancel := context.WithCancel(ctx)
+		if chaosFreq != 0 {
+			chaos := chaos.Chaos{
+				Client:    k8s,
+				Freq:      chaosFreq,
+				Namespace: namespace,
+			}
+
+			go chaos.Start(cctx)
+		}
+
 		// start the clock
 		t0 := time.Now()
 		ticker := time.NewTicker(15 * time.Second)
@@ -145,12 +170,12 @@ var testCmd = &cobra.Command{
 				defer ticker.Stop()
 
 				tn := <-ticker.C
-				if tn.Sub(t0).Minutes() > float64(timeout) {
-					fmt.Printf("Timing out after %dm\n", timeout)
+				if tn.Sub(t0) > timeout {
+					fmt.Printf("Timing out after %v\n", timeout)
 					return
 				}
-				if tn.Sub(results.Last).Minutes() > float64(msgTimeout) {
-					fmt.Printf("Last message recieved %dm ago, timing out\n", msgTimeout)
+				if tn.Sub(results.Last) > msgTimeout {
+					fmt.Printf("Last message recieved over %v ago, timing out\n", msgTimeout)
 					return
 				}
 				if results.Done() {
@@ -159,11 +184,13 @@ var testCmd = &cobra.Command{
 			}
 		}()
 
+		cancel() // don't delete any more pods
+
 		// stop the clock
 		fmt.Printf("🕓 %s\n", time.Since(t0))
 
-		fmt.Printf("Waiting %dm for any late events...\n", w)
-		time.Sleep(time.Duration(w) * time.Minute)
+		fmt.Printf("Waiting %v for any late events...\n", w)
+		time.Sleep(w)
 
 		return results.Finalize()
 	},
@@ -175,6 +202,7 @@ func init() {
 	testCmd.Flags().StringVarP(&inputTopic, "input-topic", "i", "input", "input kafka topic")
 	testCmd.Flags().StringVarP(&outputTopic, "output-topic", "o", "output", "input kafka topic")
 	testCmd.Flags().BoolVarP(&tls, "tls", "t", false, "connect to kafka with tls")
+	testCmd.Flags().BoolVarP(&sasl, "sasl", "s", false, "connect to kafka with sasl")
 	testCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "kafka verbose debugging")
 
 	// k8s
@@ -183,8 +211,9 @@ func init() {
 	testCmd.Flags().BoolVarP(&local, "local", "l", false, "indicates tests running locally (not in cluster)")
 
 	// testing
-	testCmd.Flags().IntVarP(&n, "events", "n", 1, "number of events to produce")
-	testCmd.Flags().IntVarP(&w, "wait", "w", 1, "number of minutes to wait once all messages have been produced")
-	testCmd.Flags().IntVarP(&timeout, "timeout", "", 60, "maximum number of minutes to run tests")
-	testCmd.Flags().IntVarP(&msgTimeout, "msg-timeout", "", 3, "number of minutes since the last recieved message to wait before timing out")
+	testCmd.Flags().IntVarP(&n, "n", "n", 1, "number of events to produce")
+	testCmd.Flags().DurationVarP(&w, "w", "w", 1*time.Minute, "time to wait for late events")
+	testCmd.Flags().DurationVarP(&chaosFreq, "chaos", "c", 0, "frequency to delete pod with label chaos='true' (default 0, no chaos)")
+	testCmd.Flags().DurationVarP(&timeout, "timeout", "", 1*time.Hour, "maximum time to run tests")
+	testCmd.Flags().DurationVarP(&msgTimeout, "msg-timeout", "", 3*time.Minute, "maximum time since last recieved event")
 }
