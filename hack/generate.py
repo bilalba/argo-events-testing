@@ -17,12 +17,12 @@ def sasl():
         }
     }
 
-def generate_eventbus(brokers):
+def generate_eventbus(brokers, suffix):
     return {
         'apiVersion': 'argoproj.io/v1alpha1',
         'kind': 'EventBus',
         'metadata': {
-            'name': 'default',
+            'name': f'test{suffix}',
             'labels': {
                 'argo-events-testing': 'true'
             }
@@ -37,17 +37,18 @@ def generate_eventbus(brokers):
         }
     }
 
-def generate_eventsource(n, brokers, topic):
+def generate_eventsource(n, brokers, topic, suffix):
     return {
         'apiVersion': 'argoproj.io/v1alpha1',
         'kind': 'EventSource',
         'metadata': {
-            'name': 'kafka',
+            'name': 'test',
             'labels': {
                 'argo-events-testing': 'true'
             }
         },
         'spec': {
+            'eventBusName': f'test{suffix}',
             'template': {
                 'container': {
                     'imagePullPolicy': 'Always'
@@ -67,7 +68,7 @@ def generate_eventsource(n, brokers, topic):
         }
     }
 
-def generate_sensor(n, r, brokers, topic, operator, at_least_once):
+def generate_sensor(n, r, brokers, topic, operator, at_least_once, suffix):
     combos = []
     for c in range(1, n+1):
         combos += itertools.combinations(range(n), c)
@@ -76,12 +77,13 @@ def generate_sensor(n, r, brokers, topic, operator, at_least_once):
         'apiVersion': 'argoproj.io/v1alpha1',
         'kind': 'Sensor',
         'metadata': {
-            'name': 'kafka',
+            'name': 'test',
             'labels': {
                 'argo-events-testing': 'true'
             }
         },
         'spec': {
+            'eventBusName': f'test{suffix}',
             'replicas': r,
             'template': {
                 'metadata': {
@@ -95,7 +97,7 @@ def generate_sensor(n, r, brokers, topic, operator, at_least_once):
             },
             'dependencies': [{
                 'name': f'd{i}',
-                'eventSourceName': 'kafka',
+                'eventSourceName': 'test',
                 'eventName': f'e{i}',
             } for i in range(n)],
             'triggers': [{
@@ -120,24 +122,26 @@ def generate_sensor(n, r, brokers, topic, operator, at_least_once):
         }
     }
 
-def generate(n, r, brokers, input_topic, output_topic, operator, semantics):
+def generate(n, r, brokers, input_topic, output_topic, operator, semantics, suffix=''):
     # generate eventbus
-    eb = generate_eventbus(brokers)
+    eb = generate_eventbus(brokers, suffix)
 
     # generate eventsource
-    es = generate_eventsource(n, brokers, input_topic)
+    es = generate_eventsource(n, brokers, input_topic, suffix)
 
     # generate sensor
-    sr = generate_sensor(n, r, brokers, output_topic, operator, semantics=='alo')
+    sr = generate_sensor(n, r, brokers, output_topic, operator, semantics=='alo', suffix)
 
     return yaml.dump_all([eb, es, sr])
 
 def generate_all(n, r, brokers, input_topic, output_topic, operator, semantics):
+    k = 0
     for i in range(1, n+1):
         for j in range(1, min(i+1, r+1)):
             for s in semantics:
                 with open(f'tests/t{i}-{j}x-{s}.yaml', 'w') as f:
-                    f.write(generate(i, j, args.brokers, args.input_topic, args.output_topic, args.operator, s))
+                    f.write(generate(i, j, args.brokers, args.input_topic, args.output_topic, args.operator, s, suffix=f'-{k}'))
+                    k = k + 1
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -152,6 +156,6 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     if args.all:
-        generate_all(args.n, args.r, args.brokers, args.input_topic, args.output_topic, args.operator, ['amo', 'alo'])
+        generate_all(args.n, args.r, args.brokers, args.input_topic, args.output_topic, args.operator, ['alo', 'amo'])
     else:
         print(generate(args.n, args.r, args.brokers, args.input_topic, args.output_topic, args.operator, args.semantics))
