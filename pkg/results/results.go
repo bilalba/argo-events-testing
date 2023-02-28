@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sync"
 	"time"
 
 	"github.com/Knetic/govaluate"
@@ -14,6 +15,8 @@ import (
 )
 
 type Results struct {
+	sync.Mutex
+
 	// lookup
 	Triggers       map[string]*Trigger
 	TriggersForDep map[string][]*Trigger
@@ -70,9 +73,13 @@ func (r *Results) Collect(ctx context.Context, produced <-chan *producer.Produce
 			return
 		case msg := <-produced:
 			// add event to applicable triggers
-			for _, trigger := range r.TriggersForDep[msg.Dependency.Name] {
-				trigger.remaining = append(trigger.remaining, msg)
-			}
+			func() {
+				r.Lock()
+				defer r.Unlock()
+				for _, trigger := range r.TriggersForDep[msg.Dependency.Name] {
+					trigger.remaining = append(trigger.remaining, msg)
+				}
+			}()
 		case msg := <-consumed:
 			r.Last = time.Now()
 			r.analyze(msg)
@@ -81,6 +88,9 @@ func (r *Results) Collect(ctx context.Context, produced <-chan *producer.Produce
 }
 
 func (r *Results) Done() bool {
+	r.Lock()
+	defer r.Unlock()
+
 	for _, trigger := range r.Triggers {
 		if _, ok := trigger.Satisfied(); ok {
 			return false
@@ -121,6 +131,9 @@ func (r *Results) Finalize() error {
 }
 
 func (r *Results) analyze(msg *consumer.ConsumerMsg) {
+	r.Lock()
+	defer r.Unlock()
+
 	params := Parameters{}
 	trigger := r.Triggers[msg.Trigger]
 
@@ -222,6 +235,7 @@ func (t *Trigger) containsAndShuffle(dep string, val string) bool {
 
 	for i, msg := range t.extra {
 		if msg.Dependency.Name == dep && msg.Value == val {
+			t.extra[i] = nil
 			t.extra = append(t.extra[:i], t.extra[i+1:]...)
 			return true
 		}

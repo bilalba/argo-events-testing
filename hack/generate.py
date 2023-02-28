@@ -17,6 +17,11 @@ def sasl():
         }
     }
 
+def tls():
+    return {
+        'insecureSkipVerify': True
+    }
+
 def generate_eventbus(brokers, suffix):
     return {
         'apiVersion': 'argoproj.io/v1alpha1',
@@ -31,7 +36,8 @@ def generate_eventbus(brokers, suffix):
             'kafka': {
                 'exotic': {
                     'url': ','.join(brokers),
-                    'sasl': sasl()
+                    'sasl': sasl(),
+                    'tls': tls()
                 }
             }
         }
@@ -50,6 +56,7 @@ def generate_eventsource(n, brokers, topic, suffix):
         'spec': {
             'eventBusName': f'test{suffix}',
             'template': {
+                'serviceAccountName': 'test',
                 'container': {
                     'imagePullPolicy': 'Always'
                 }
@@ -60,6 +67,7 @@ def generate_eventsource(n, brokers, topic, suffix):
                     'topic': topic,
                     'partition': '0',
                     'sasl': sasl(),
+                    'tls': tls(),
                     'filter': {
                         'expression': f'key=="e{i}"'
                     }
@@ -91,6 +99,7 @@ def generate_sensor(n, r, brokers, topic, operator, at_least_once, suffix):
                         'chaos': 'true'
                     }
                 },
+                'serviceAccountName': 'test',
                 'container': {
                     'imagePullPolicy': 'Always'
                 }
@@ -109,6 +118,7 @@ def generate_sensor(n, r, brokers, topic, operator, at_least_once, suffix):
                         'url': ','.join(brokers),
                         'topic': topic,
                         'sasl': sasl(),
+                        'tls': tls(),
                         'payload': [{
                             'src': {
                                 'dependencyName': f'd{i}',

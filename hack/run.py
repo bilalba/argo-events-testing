@@ -1,3 +1,4 @@
+import os
 import sys
 import glob
 import time
@@ -17,7 +18,7 @@ for index, filename in enumerate(glob.glob(sys.argv[1] if len(sys.argv) > 1 else
     if p.returncode:
         sys.exit(p.returncode)
 
-    time.sleep(15)
+    time.sleep(30)
 
     # Test
     print('Running test')
@@ -46,7 +47,7 @@ spec:
     - -b
     - b-3.argoevents2.vywt8t.c10.kafka.us-west-2.amazonaws.com:9096
     - -n
-    - '500'
+    - '1000'
     - -w
     - 30s
     - --chaos
@@ -68,11 +69,11 @@ spec:
     imagePullPolicy: Always
     resources:
       requests:
-        cpu: 1
-        memory: 12G
+        cpu: 2
+        memory: 8G
       limits:
-        cpu: 1
-        memory: 12G'''
+        cpu: 2
+        memory: 8G'''
 
     p = subprocess.run([
         'kubectl',
@@ -89,11 +90,21 @@ spec:
             'kubectl',
             'logs',
             '-f',
-            f'pod/test'
-        ], input=bytes(pod, 'utf-8'))
+            'pod/test'
+        ])
 
         if p.returncode == 0:
             break
+
+    # Grab results
+    with open(f'results/{os.path.basename(filename)}.out', 'w') as f:
+      p = subprocess.run([
+          'kubectl',
+          'logs',
+          '--tail',
+          '50',
+          'pod/test'
+      ], stdout=f)
 
     # Cleanup
     print('Cleanup')
@@ -101,7 +112,7 @@ spec:
     p = subprocess.run([
         'kubectl',
         'delete',
-        f'pod/test'
+        'pod/test'
     ])
 
     if p.returncode:

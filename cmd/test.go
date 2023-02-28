@@ -164,12 +164,12 @@ var testCmd = &cobra.Command{
 		// start the clock
 		t0 := time.Now()
 		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
 
 		func() {
 			for {
-				defer ticker.Stop()
-
 				tn := <-ticker.C
+
 				if tn.Sub(t0) > timeout {
 					fmt.Printf("Timing out after %v\n", timeout)
 					return
@@ -206,7 +206,7 @@ func init() {
 	testCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "kafka verbose debugging")
 
 	// k8s
-	testCmd.Flags().StringVarP(&name, "name", "", "kafka", "sensor name")
+	testCmd.Flags().StringVarP(&name, "name", "", "test", "sensor name")
 	testCmd.Flags().StringVarP(&namespace, "namespace", "", "default", "namespace")
 	testCmd.Flags().BoolVarP(&local, "local", "l", false, "indicates tests running locally (not in cluster)")
 
