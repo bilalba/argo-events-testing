@@ -1,0 +1,4 @@
+.DS_Store
+argo-events-testing
+*.yaml
+results/
