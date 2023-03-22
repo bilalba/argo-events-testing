@@ -11,7 +11,6 @@ import (
 	"github.com/bilalba/argo-events-testing/pkg/consumer"
 	"github.com/bilalba/argo-events-testing/pkg/producer"
 	"github.com/bilalba/argo-events-testing/pkg/sensor/v1alpha1"
-	"gonum.org/v1/gonum/stat/combin"
 )
 
 type Results struct {
@@ -205,19 +204,12 @@ type Trigger struct {
 }
 
 func (t *Trigger) Satisfied() (Parameters, bool) {
-	if len(t.remaining) < t.Terms {
-		return nil, false
-	}
-
-	for _, combination := range combin.Combinations(len(t.remaining), t.Terms) {
-		params := Parameters{}
-		for _, i := range combination {
-			params[t.remaining[i].Dependency.Name] = t.remaining[i].Value
-		}
+	params := Parameters{}
+	for _, msg := range t.remaining {
+		params[msg.Dependency.Name] = msg.Value
 
 		// check expression
-		satisfied, _ := t.Expr.Eval(params)
-		if satisfied == true {
+		if satisfied, _ := t.Expr.Eval(params); satisfied == true {
 			return params, true
 		}
 	}

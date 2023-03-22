@@ -18,7 +18,7 @@ for index, filename in enumerate(glob.glob(sys.argv[1] if len(sys.argv) > 1 else
     if p.returncode:
         sys.exit(p.returncode)
 
-    time.sleep(30)
+    time.sleep(60)
 
     # Test
     print('Running test')
@@ -47,13 +47,17 @@ spec:
     - -b
     - b-3.argoevents2.vywt8t.c10.kafka.us-west-2.amazonaws.com:9096
     - -n
-    - '1000'
+    - '100'
     - -w
     - 30s
     - --chaos
     - 30s
     - --tls
     - --sasl
+    - --msg-timeout
+    - 10m
+    - --timeout
+    - 1h
     env:
     - name: SASL_USERNAME
       valueFrom:
@@ -66,14 +70,7 @@ spec:
           name: kafka-secret
           key: password
     image: docker.intuit.com/personal/dfarr/argo-events-testing:latest
-    imagePullPolicy: Always
-    resources:
-      requests:
-        cpu: 2
-        memory: 8G
-      limits:
-        cpu: 2
-        memory: 8G'''
+    imagePullPolicy: Always'''
 
     p = subprocess.run([
         'kubectl',
@@ -130,4 +127,3 @@ spec:
 
     # pause in order to collect data
     print(f'Finished "{filename}"')
-    time.sleep(15)

@@ -8,7 +8,6 @@ require (
 	github.com/google/uuid v1.1.2
 	github.com/spf13/cobra v1.6.1
 	github.com/xdg-go/scram v1.1.2
-	gonum.org/v1/gonum v0.12.0
 	k8s.io/api v0.26.1
 	k8s.io/apimachinery v0.26.1
 	k8s.io/client-go v0.26.1

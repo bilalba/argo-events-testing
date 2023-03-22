@@ -34,11 +34,9 @@ def generate_eventbus(brokers, suffix):
         },
         'spec': {
             'kafka': {
-                'exotic': {
-                    'url': ','.join(brokers),
-                    'sasl': sasl(),
-                    'tls': tls()
-                }
+                'url': ','.join(brokers),
+                'sasl': sasl(),
+                'tls': tls()
             }
         }
     }
@@ -119,6 +117,7 @@ def generate_sensor(n, r, brokers, topic, operator, at_least_once, suffix):
                         'topic': topic,
                         'sasl': sasl(),
                         'tls': tls(),
+                        'partitioningKey': f't{i}',
                         'payload': [{
                             'src': {
                                 'dependencyName': f'd{i}',
